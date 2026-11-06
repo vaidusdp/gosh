@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strconv"
 	"strings"
 )
 
@@ -21,14 +22,25 @@ func showHelp() {
 	fmt.Println("  exit     - Exit The Shell")
 }
 
+const (
+    StatusSuccess      = 0
+    StatusGeneralError = 1
+    StatusUsageError   = 2
+    StatusNotFound     = 127
+    StatusNotExecutable = 126
+)
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	currentUser, userErr := user.Current()
 
+	lastExitStatus := StatusSuccess
+
 	if userErr != nil {
 		fmt.Println("Unable To Find Current User!")
-		os.Exit(1)
+		lastExitStatus = StatusGeneralError
+		os.Exit(lastExitStatus)
 	}
 
 
@@ -37,12 +49,15 @@ func main() {
 
 		if err != nil {
 			fmt.Println("Unable to direct current working directory!")
-			os.Exit(1)
+			lastExitStatus = StatusGeneralError
+			os.Exit(lastExitStatus)
 		}
 
-		terminalLine := currentUser.Username + ":" +currentDir + "$" + " "
+		terminalLine := currentUser.Username + ":" + currentDir + "$" + " "
 
 		fmt.Print(terminalLine)
+
+		exitStatus := strconv.Itoa(lastExitStatus)
 
 		check := scanner.Scan()
 		
@@ -59,6 +74,9 @@ func main() {
 			continue
 		}
 
+		code = strings.ReplaceAll(code, "$?", exitStatus)
+		code = os.ExpandEnv(code)
+
 		codeList := strings.Fields(code)
 		if len(codeList) == 0 {
 			fmt.Println("Invalid Command")
@@ -67,6 +85,7 @@ func main() {
 		codeCommand := codeList[0]
 
 		codeArgList := codeList[1:]
+
 
 		cmd := exec.Command(codeCommand, codeArgList...)
 
@@ -80,10 +99,13 @@ func main() {
 					homeDir, er := os.UserHomeDir()
 					if er != nil {
 						fmt.Println("cd:", er)
+						lastExitStatus = StatusUsageError
+						continue
 					}
 					err := os.Chdir(homeDir)
 					if err != nil {
 						fmt.Println("cd:", err)
+						lastExitStatus = StatusUsageError
 					}
 					continue
 				}
@@ -92,21 +114,26 @@ func main() {
 				er := os.Chdir(dir)
 				if er != nil {
 					fmt.Println("cd:", er)
+					lastExitStatus = StatusUsageError
 				}
+				lastExitStatus = StatusSuccess
 				continue
 			case "pwd":
 				dir, er := os.Getwd() 
 				if er != nil {
 					fmt.Println("pwd:", er)
+					lastExitStatus = StatusUsageError
 					continue
 				}
 				fmt.Println(dir)
+				lastExitStatus = StatusSuccess
 				continue
 			case "exit":
-				os.Exit(0)
+				os.Exit(lastExitStatus)
 			case "export":
 				if len(codeArgList) != 1 {
 					fmt.Println("export: usage: export KEY=value")
+					lastExitStatus = StatusUsageError
 					continue
 				}
 
@@ -114,28 +141,41 @@ func main() {
 
 				if len(keyValueList) != 2 || keyValueList[0] == "" {
 					fmt.Println("export: invalid assignment")
+					lastExitStatus = StatusUsageError
 					continue
 				}
 				key := keyValueList[0]
 				value := keyValueList[1]
 
-				os.Setenv(key, value)
+				err := os.Setenv(key, value)
+				if err != nil {
+					fmt.Println("export:", err)
+					lastExitStatus = StatusUsageError
+					continue
+				}
+
+				lastExitStatus = StatusSuccess
 				continue
 			case "unset":
 				if len(codeArgList) == 0 {
 					fmt.Println("unset: usage: unset KEY...")
+					lastExitStatus = StatusUsageError
 					continue
 				}
 
 				for _, key := range codeArgList {
 					err := os.Unsetenv(key)
 					if err != nil {
-						fmt.Println("unset:", err)
+						fmt.Println("unset:", err)	
+						lastExitStatus = StatusUsageError
 					}
 				}
+
+				lastExitStatus = StatusSuccess
 				continue
 			case "help":
 				showHelp()
+				lastExitStatus = StatusSuccess
 				continue
 		}
 
@@ -144,12 +184,14 @@ func main() {
 			_, lookErr := exec.LookPath(codeCommand)
 			if lookErr != nil {
 				fmt.Println("gosh:", codeCommand, ": command not found")
+				lastExitStatus = StatusNotFound
 				continue
 			}
 
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr){
 				fmt.Println("Command exited with status:", exitErr.ExitCode())
+				lastExitStatus = exitErr.ExitCode()
         		continue
 			}
 
@@ -159,9 +201,10 @@ func main() {
 				fmt.Println("Execution error:", err)
 			}
 
+			lastExitStatus = StatusNotExecutable
 			continue
 		}
 
-			
+		lastExitStatus = StatusSuccess
 	}
 }
