@@ -31,6 +31,7 @@ const (
 )
 
 func main() {
+	fmt.Println("Hello From Gosh😊")
 	scanner := bufio.NewScanner(os.Stdin)
 
 	currentUser, userErr := user.Current()
